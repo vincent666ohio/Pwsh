@@ -13,6 +13,10 @@ function Update-KTalk-DefaultRole {
         
         [array]$RemovePermissions,
         
+        [array]$EnablePermissions,    # Новый параметр: включить разрешения (disabled=false)
+        
+        [array]$DisablePermissions,   # Новый параметр: отключить разрешения (disabled=true)
+        
         [switch]$UseCurrentAsBase,
         
         [switch]$KeepCommonPermissions,
@@ -79,16 +83,19 @@ function Update-KTalk-DefaultRole {
                 $permissionObj = New-Object PSObject -Property @{
                     productId = $perm.productId
                     permissionId = $perm.permissionId
+                    disabled = $perm.disabled
                 }
                 $basePermissions += $permissionObj
             }
             Write-Host "Текущих разрешений: $($basePermissions.Count)" -ForegroundColor Gray
             
             # Показываем текущие разрешения если их немного
-            if ($currentPerms.Count -le 10) {
-                Write-Host "Текущие разрешения:" -ForegroundColor DarkGray
+            if ($currentPerms.Count -le 15) {
+                Write-Host "Текущие разрешения (disabled в скобках):" -ForegroundColor DarkGray
                 foreach ($perm in $currentPerms) {
-                    Write-Host "  - $($perm.productId)/$($perm.permissionId): $($perm.permissionTitle)" -ForegroundColor Gray
+                    $status = if ($perm.disabled) { "Отключено" } else { "Включено" }
+                    $color = if ($perm.disabled) { "Red" } else { "Green" }
+                    Write-Host "  - $($perm.productId)/$($perm.permissionId): $status" -ForegroundColor $color
                 }
             }
         }
@@ -111,8 +118,13 @@ function Update-KTalk-DefaultRole {
         if ($null -ne $AddPermissions -and $AddPermissions.Count -gt 0) {
             Write-Host "Разрешения для добавления ($($AddPermissions.Count)):" -ForegroundColor Green
             foreach ($perm in $AddPermissions) {
-                Write-Host "  + $($perm.productId)/$($perm.permissionId)" -ForegroundColor Green
-                $basePermissions += $perm
+                $permissionObj = @{
+                    productId = $perm.productId
+                    permissionId = $perm.permissionId
+                    disabled = $false
+                }
+                Write-Host "  + $($perm.productId)/$($perm.permissionId) (будет включено)" -ForegroundColor Green
+                $basePermissions += $permissionObj
             }
         }
         
@@ -127,7 +139,7 @@ function Update-KTalk-DefaultRole {
                     if ($perm.productId -eq $removePerm.productId -and 
                         $perm.permissionId -eq $removePerm.permissionId) {
                         $shouldRemove = $true
-                        Write-Host "  - $($perm.productId)/$($perm.permissionId)" -ForegroundColor Yellow
+                        Write-Host "  - $($perm.productId)/$($perm.permissionId) (будет удалено)" -ForegroundColor Yellow
                         $removedCount++
                         break
                     }
@@ -139,13 +151,107 @@ function Update-KTalk-DefaultRole {
             $basePermissions = $filteredPermissions
         }
         
-        # Показываем итоговый список разрешений
+        # Включаем разрешения (устанавливаем disabled=false)
+        $enabledCount = 0
+        if ($null -ne $EnablePermissions -and $EnablePermissions.Count -gt 0) {
+            Write-Host "Разрешения для включения ($($EnablePermissions.Count)):" -ForegroundColor Green
+            foreach ($permToEnable in $EnablePermissions) {
+                $found = $false
+                for ($i = 0; $i -lt $basePermissions.Count; $i++) {
+                    if ($basePermissions[$i].productId -eq $permToEnable.productId -and 
+                        $basePermissions[$i].permissionId -eq $permToEnable.permissionId) {
+                        # Обновляем существующее разрешение
+                        $basePermissions[$i].disabled = $false
+                        Write-Host "  ✓ $($permToEnable.productId)/$($permToEnable.permissionId) (будет включено)" -ForegroundColor Green
+                        $enabledCount++
+                        $found = $true
+                        break
+                    }
+                }
+                if (-not $found) {
+                    # Добавляем новое разрешение с disabled=false
+                    $permissionObj = @{
+                        productId = $permToEnable.productId
+                        permissionId = $permToEnable.permissionId
+                        disabled = $false
+                    }
+                    $basePermissions += $permissionObj
+                    Write-Host "  + $($permToEnable.productId)/$($permToEnable.permissionId) (будет добавлено и включено)" -ForegroundColor Green
+                }
+            }
+        }
+        
+        # Отключаем разрешения (устанавливаем disabled=true)
+        $disabledCount = 0
+        if ($null -ne $DisablePermissions -and $DisablePermissions.Count -gt 0) {
+            Write-Host "Разрешения для отключения ($($DisablePermissions.Count)):" -ForegroundColor Yellow
+            foreach ($permToDisable in $DisablePermissions) {
+                $found = $false
+                for ($i = 0; $i -lt $basePermissions.Count; $i++) {
+                    if ($basePermissions[$i].productId -eq $permToDisable.productId -and 
+                        $basePermissions[$i].permissionId -eq $permToDisable.permissionId) {
+                        # Обновляем существующее разрешение
+                        $basePermissions[$i].disabled = $true
+                        Write-Host "  ⚠ $($permToDisable.productId)/$($permToDisable.permissionId) (будет отключено)" -ForegroundColor Yellow
+                        $disabledCount++
+                        $found = $true
+                        break
+                    }
+                }
+                if (-not $found) {
+                    # Добавляем новое разрешение с disabled=true
+                    $permissionObj = @{
+                        productId = $permToDisable.productId
+                        permissionId = $permToDisable.permissionId
+                        disabled = $true
+                    }
+                    $basePermissions += $permissionObj
+                    Write-Host "  + $($permToDisable.productId)/$($permToDisable.permissionId) (будет добавлено и отключено)" -ForegroundColor Yellow
+                }
+            }
+        }
+        
+        # Показываем итоговый список разрешений с их статусом
         Write-Host "`nИтоговые разрешения ($($basePermissions.Count)):" -ForegroundColor Cyan
+        
         if ($basePermissions.Count -eq 0) {
             Write-Warning "Список разрешений пуст. Все разрешения будут отозваны у роли." -ForegroundColor Red
         } else {
-            foreach ($perm in $basePermissions) {
-                Write-Host "  • $($perm.productId)/$($perm.permissionId)" -ForegroundColor Gray
+            # Сортируем по статусу для лучшей читаемости
+            $enabledPerms = $basePermissions | Where-Object { $_.disabled -eq $false } | Sort-Object productId, permissionId
+            $disabledPerms = $basePermissions | Where-Object { $_.disabled -eq $true } | Sort-Object productId, permissionId
+            
+            if ($enabledPerms.Count -gt 0) {
+                Write-Host "Включенные разрешения ($($enabledPerms.Count)):" -ForegroundColor Green
+                foreach ($perm in $enabledPerms) {
+                    Write-Host "  ✓ $($perm.productId)/$($perm.permissionId)" -ForegroundColor Green
+                }
+            }
+            
+            if ($disabledPerms.Count -gt 0) {
+                Write-Host "Отключенные разрешения ($($disabledPerms.Count)):" -ForegroundColor Gray
+                foreach ($perm in $disabledPerms) {
+                    Write-Host "  ⚠ $($perm.productId)/$($perm.permissionId) (disabled=true)" -ForegroundColor Gray
+                }
+            }
+            
+            # Статистика изменений
+            $changesSummary = @()
+            if ($AddPermissions -and $AddPermissions.Count -gt 0) {
+                $changesSummary += "Добавлено: $($AddPermissions.Count)"
+            }
+            if ($removedCount -gt 0) {
+                $changesSummary += "Удалено: $removedCount"
+            }
+            if ($enabledCount -gt 0) {
+                $changesSummary += "Включено: $enabledCount"
+            }
+            if ($disabledCount -gt 0) {
+                $changesSummary += "Отключено: $disabledCount"
+            }
+            
+            if ($changesSummary.Count -gt 0) {
+                Write-Host "`nСводка изменений: $($changesSummary -join ', ')" -ForegroundColor Cyan
             }
         }
         
@@ -158,17 +264,51 @@ function Update-KTalk-DefaultRole {
                 RoleId = $RoleId
                 Message = "DryRun - изменения не применены"
                 PermissionsCount = $basePermissions.Count
+                EnabledCount = ($basePermissions | Where-Object { $_.disabled -eq $false }).Count
+                DisabledCount = ($basePermissions | Where-Object { $_.disabled -eq $true }).Count
                 Permissions = $basePermissions
                 Status = "DryRun"
                 AddedCount = if ($AddPermissions) { $AddPermissions.Count } else { 0 }
                 RemovedCount = $removedCount
+                EnabledPermissionsCount = $enabledCount
+                DisabledPermissionsCount = $disabledCount
             }
             
             return $result
         } else {
+            # Преобразуем разрешения в формат для API (убираем поле disabled если false)
+            $apiPermissions = @()
+            foreach ($perm in $basePermissions) {
+                $apiPerm = @{
+                    productId = $perm.productId
+                    permissionId = $perm.permissionId
+                }
+                
+                # Добавляем disabled только если true
+                if ($perm.disabled -eq $true) {
+                    $apiPerm.disabled = $true
+                }
+                
+                $apiPermissions += $apiPerm
+            }
+            
             # Применяем изменения
-            return Set-KTalk-DefaultRole -AuthToken $AuthToken -Permissions $basePermissions -RoleId $RoleId
+            return Set-KTalk-DefaultRole -AuthToken $AuthToken -Permissions $apiPermissions -RoleId $RoleId
         }
+    }
+    
+    # Проверяем конфликты параметров
+    $actionCount = 0
+    if ($AddPermissions -and $AddPermissions.Count -gt 0) { $actionCount++ }
+    if ($RemovePermissions -and $RemovePermissions.Count -gt 0) { $actionCount++ }
+    if ($EnablePermissions -and $EnablePermissions.Count -gt 0) { $actionCount++ }
+    if ($DisablePermissions -and $DisablePermissions.Count -gt 0) { $actionCount++ }
+    if ($TemplatePath) { $actionCount++ }
+    if ($UseCurrentAsBase) { $actionCount++ }
+    
+    if ($actionCount -eq 0) {
+        Write-Error "Не указано ни одного действия. Используйте хотя бы один из параметров: -AddPermissions, -RemovePermissions, -EnablePermissions, -DisablePermissions, -TemplatePath, -UseCurrentAsBase"
+        return $null
     }
     
     # Основная логика в зависимости от типа роли
@@ -212,9 +352,10 @@ function Update-KTalk-DefaultRole {
                     foreach ($anonymousPerm in $anonymousPerms) {
                         if ($defaultPerm.productId -eq $anonymousPerm.productId -and 
                             $defaultPerm.permissionId -eq $anonymousPerm.permissionId) {
-                            $permissionObj = New-Object PSObject -Property @{
+                            $permissionObj = @{
                                 productId = $defaultPerm.productId
                                 permissionId = $defaultPerm.permissionId
+                                disabled = $defaultPerm.disabled
                             }
                             $commonPermissions += $permissionObj
                             break
@@ -234,6 +375,8 @@ function Update-KTalk-DefaultRole {
                         RoleId = "default"
                         Message = "DryRun - общие разрешения"
                         PermissionsCount = $commonPermissions.Count
+                        EnabledCount = ($commonPermissions | Where-Object { $_.disabled -eq $false }).Count
+                        DisabledCount = ($commonPermissions | Where-Object { $_.disabled -eq $true }).Count
                         Permissions = $commonPermissions
                         Status = "DryRun"
                     }
@@ -245,6 +388,8 @@ function Update-KTalk-DefaultRole {
                         RoleId = "defaultAnonymousUser"
                         Message = "DryRun - общие разрешения"
                         PermissionsCount = $commonPermissions.Count
+                        EnabledCount = ($commonPermissions | Where-Object { $_.disabled -eq $false }).Count
+                        DisabledCount = ($commonPermissions | Where-Object { $_.disabled -eq $true }).Count
                         Permissions = $commonPermissions
                         Status = "DryRun"
                     }
@@ -252,9 +397,22 @@ function Update-KTalk-DefaultRole {
                     if ($null -ne $result1) { $results += $result1 }
                     if ($null -ne $result2) { $results += $result2 }
                 } else {
+                    # Преобразуем для API
+                    $apiPermissions = @()
+                    foreach ($perm in $commonPermissions) {
+                        $apiPerm = @{
+                            productId = $perm.productId
+                            permissionId = $perm.permissionId
+                        }
+                        if ($perm.disabled -eq $true) {
+                            $apiPerm.disabled = $true
+                        }
+                        $apiPermissions += $apiPerm
+                    }
+                    
                     # Применяем общие разрешения к обеим ролям
-                    $result1 = Set-KTalk-DefaultRole -AuthToken $AuthToken -Permissions $commonPermissions -RoleId "default"
-                    $result2 = Set-KTalk-DefaultRole -AuthToken $AuthToken -Permissions $commonPermissions -RoleId "defaultAnonymousUser"
+                    $result1 = Set-KTalk-DefaultRole -AuthToken $AuthToken -Permissions $apiPermissions -RoleId "default"
+                    $result2 = Set-KTalk-DefaultRole -AuthToken $AuthToken -Permissions $apiPermissions -RoleId "defaultAnonymousUser"
                     
                     if ($null -ne $result1) { $results += $result1 }
                     if ($null -ne $result2) { $results += $result2 }
@@ -289,13 +447,14 @@ function Update-KTalk-DefaultRole {
         # Показываем детали по каждой роли в DryRun
         foreach ($result in $results) {
             Write-Host "`nРоль: $($result.RoleName) ($($result.RoleId))" -ForegroundColor Yellow
-            Write-Host "Будет установлено разрешений: $($result.PermissionsCount)" -ForegroundColor Gray
-            if ($result.PermissionsCount -gt 0) {
-                Write-Host "Разрешения:" -ForegroundColor DarkGray
-                foreach ($perm in $result.Permissions) {
-                    Write-Host "  - $($perm.productId)/$($perm.permissionId)" -ForegroundColor Gray
-                }
-            }
+            Write-Host "Всего разрешений: $($result.PermissionsCount)" -ForegroundColor White
+            Write-Host "Включено: $($result.EnabledCount)" -ForegroundColor Green
+            Write-Host "Отключено: $($result.DisabledCount)" -ForegroundColor Gray
+            
+            if ($result.AddedCount -gt 0) { Write-Host "Будет добавлено: $($result.AddedCount)" -ForegroundColor Green }
+            if ($result.RemovedCount -gt 0) { Write-Host "Будет удалено: $($result.RemovedCount)" -ForegroundColor Yellow }
+            if ($result.EnabledPermissionsCount -gt 0) { Write-Host "Будет включено: $($result.EnabledPermissionsCount)" -ForegroundColor Green }
+            if ($result.DisabledPermissionsCount -gt 0) { Write-Host "Будет отключено: $($result.DisabledPermissionsCount)" -ForegroundColor Yellow }
         }
     } else {
         Write-Host "Успешно обновлено: $successCount ролей" -ForegroundColor Green
