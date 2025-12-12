@@ -78,17 +78,30 @@ function Repair-KTalk-RolesEncoding {
         $newTitle = $role.Title -replace '\?+', ''  # Убираем знаки вопроса
         
         if ($template -and $template.Title -notin @("ROLE_TITLE", "НАЗВАНИЕ_РОЛИ")) {
-            # Используем название из шаблона, но с уникальным идентификатором
-            $newTitle = "$($template.Title) ($($role.RoleId))"
+            # Используем название из шаблона БЕЗ добавления RoleId
+            $newTitle = $template.Title
         }
         elseif ([string]::IsNullOrWhiteSpace($newTitle) -or $newTitle -match '^[?]+$') {
             # Если после очистки название пустое
-            $newTitle = "Role_$($role.RoleId)"
+            $newTitle = "Роль_$($role.RoleId)"
         }
         
         $newDescription = $role.Description -replace '\?+', ''
+        
+        # Добавляем идентификатор роли в описание
+        $idInfo = "Идентификатор роли: $($role.RoleId)"
+        
         if ($template -and $template.Description -notin @("ROLE_DESCRIPTION", "ОПИСАНИЕ_РОЛИ")) {
-            $newDescription = $template.Description
+            # Добавляем идентификатор к описанию из шаблона
+            $newDescription = "$($template.Description). $idInfo"
+        }
+        elseif ([string]::IsNullOrWhiteSpace($newDescription) -or $newDescription -match '^[?]+$') {
+            # Если описание пустое или содержит только знаки вопроса
+            $newDescription = $idInfo
+        }
+        else {
+            # Добавляем идентификатор к существующему описанию
+            $newDescription = "$newDescription. $idInfo"
         }
         
         Write-Host "Новое название: $newTitle" -ForegroundColor Yellow
@@ -99,7 +112,9 @@ function Repair-KTalk-RolesEncoding {
             $results += [PSCustomObject]@{
                 RoleId = $role.RoleId
                 OldTitle = $role.Title
+                OldDescription = $role.Description
                 NewTitle = $newTitle
+                NewDescription = $newDescription
                 Status = "DryRun"
             }
         } else {
@@ -131,7 +146,9 @@ function Repair-KTalk-RolesEncoding {
                 $results += [PSCustomObject]@{
                     RoleId = $role.RoleId
                     OldTitle = $role.Title
+                    OldDescription = $role.Description
                     NewTitle = $newTitle
+                    NewDescription = $newDescription
                     Status = "Success"
                     Method = $result.Method
                 }
@@ -140,7 +157,9 @@ function Repair-KTalk-RolesEncoding {
                 $results += [PSCustomObject]@{
                     RoleId = $role.RoleId
                     OldTitle = $role.Title
+                    OldDescription = $role.Description
                     NewTitle = $newTitle
+                    NewDescription = $newDescription
                     Status = "Failed"
                 }
             }
@@ -159,6 +178,21 @@ function Repair-KTalk-RolesEncoding {
         Write-Host "Успешно исправлено: $successCount ролей" -ForegroundColor Green
         if ($failedCount -gt 0) {
             Write-Host "Не удалось исправить: $failedCount ролей" -ForegroundColor Red
+        }
+    }
+    
+    # 6. Показываем детальную информацию об изменениях
+    if ($results.Count -gt 0) {
+        Write-Host "`nДетали изменений:" -ForegroundColor Cyan
+        foreach ($result in $results) {
+            Write-Host "`nРоль: $($result.RoleId)" -ForegroundColor Yellow
+            Write-Host "  Было название: $($result.OldTitle)" -ForegroundColor Gray
+            Write-Host "  Стало название: $($result.NewTitle)" -ForegroundColor Green
+            if ($result.OldDescription -ne $result.NewDescription) {
+                Write-Host "  Было описание: $($result.OldDescription)" -ForegroundColor Gray
+                Write-Host "  Стало описание: $($result.NewDescription)" -ForegroundColor Green
+            }
+            Write-Host "  Статус: $($result.Status)" -ForegroundColor $(if ($result.Status -eq "Success") {"Green"} elseif ($result.Status -eq "Failed") {"Red"} else {"Magenta"})
         }
     }
     
